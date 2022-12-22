@@ -6,6 +6,14 @@ import re
 import sys
 
 
+def banner(message, loud=False):
+    rtn = f"===== {message} ====="
+    if loud:
+        rule = "=" * (len(message) + 12)
+        rtn = "\n".join([rule, rtn, rule])
+    return rtn
+
+
 class Cell(object):
     """Stack of values on a single entry in the puzzle."""
 
@@ -19,6 +27,10 @@ class Cell(object):
     def coords(self):
         return self.row, self.col
 
+    @property
+    def size(self):
+        return len(self.stack)
+
     def force(self, value):
         """Force this entry to be a set with the given `value`"""
         assert isinstance(value, set)
@@ -26,22 +38,53 @@ class Cell(object):
         self.stack = value
 
     def prune(self, value):
-        """Remove elements in set `value` from this entry."""
+        """Remove elements in set `value` from this cell."""
         assert isinstance(value, set)
-        print(f"Prune {value} from {self.coords}")
+        # print(f"Prune {value} from {self.coords}")
         if len(self.stack) > 1:
             self.stack -= value
             if len(self.stack) == 1:
-                print("Constrained {0} to {1}".format(self.coords, self.stack))
+                print(f"Constrained {self.coords} to {self.stack}")
+                return self
+        return None
 
     def __str__(self):
         values = list(self.stack)
         if len(values) == 1:
             # It's a single value; return it.
-            return ' {0}  '.format(values[0])
+            return f" {values[0]}  "
         else:
             # It has multiple values; return how many.
-            return '[{0}] '.format(len(values))
+            return f"[{len(values)}] "
+
+
+class WorkQueue(object):
+    def __init__(self, puzzle):
+        self.puzzle = puzzle
+        self.queue = []
+
+    def __str__(self):
+        output = banner("Queue") + "\n"
+        if len(self.queue) > 1:
+            output += "\n".join([f"{cell.coords} {cell.stack}" for cell in self.queue])
+        else:
+            output += "empty"
+        return output
+
+    @property
+    def empty(self):
+        return len(self.queue) == 0
+
+    def add(self, cell):
+        self.queue.append(cell)
+        print(self)
+
+    def do_one(self):
+        assert not self.empty
+        cell = self.queue.pop(0)
+        assert cell.size == 1
+        self.puzzle.set(cell.idx, list(cell.stack)[0])
+        print(self)
 
 
 class Puzzle(object):
@@ -49,7 +92,8 @@ class Puzzle(object):
         self.dim = dim
         self.size = self.dim * self.dim
         self.length = self.size * self.size
-        self.frame = [Cell(self, idx) for idx in range(self.length)]
+        self.cells = [Cell(self, idx) for idx in range(self.length)]
+        self.work = WorkQueue(self)
 
     def load(self, path):
         """Load a puzzle from the file at 'path'."""
@@ -64,23 +108,26 @@ class Puzzle(object):
                     if col.isdigit():
                         self.set(idx, int(col))
                     idx += 1
+        print(banner("Puzzle loaded", True))
+
+    def solve(self):
+        while not self.work.empty:
+            self.work.do_one()
 
     def set(self, idx, val):
         assert isinstance(val, int)
         print(self)
         arg = {val}
-        for entry in self.row_containing(idx):
-            entry.prune(arg)
-        for entry in self.col_containing(idx):
-            entry.prune(arg)
-        for entry in self.block_containing(idx):
-            entry.prune(arg)
-        self.frame[idx].force(arg)
+        for entry in self.row_containing(idx) + self.col_containing(idx) + self.block_containing(idx):
+            cell = entry.prune(arg)
+            if cell is not None:
+                self.work.add(cell)
+        self.cells[idx].force(arg)
 
     def row(self, row):
         """Return the row of the puzzle at index `row`."""
         assert row < self.size
-        return self.frame[row * self.size: (row + 1) * self.size]
+        return self.cells[row * self.size: (row + 1) * self.size]
 
     def row_containing(self, idx):
         """Return the row of the puzzle containing the given `idx`."""
@@ -90,7 +137,7 @@ class Puzzle(object):
     def col(self, col):
         """Return a column of the puzzle at index `col`."""
         assert col < self.size
-        return self.frame[col: col + self.length: self.size]
+        return self.cells[col: col + self.length: self.size]
 
     def col_containing(self, idx):
         """Return the column of the puzzle containing the given `idx`."""
@@ -101,7 +148,7 @@ class Puzzle(object):
         """Return the sub-block of the puzzle at index `idx`."""
         assert idx < self.size
         row, col = divmod(idx, self.dim)
-        return [self.frame[r * self.size + c]
+        return [self.cells[r * self.size + c]
                 for r in range(row * self.dim, row * self.dim + self.dim)
                 for c in range(col * self.dim, col * self.dim + self.dim)]
 
@@ -117,7 +164,7 @@ class Puzzle(object):
         rtn = ''
         cols = 0
         rows = 0
-        for entry in self.frame:
+        for entry in self.cells:
             rtn += str(entry)
             cols += 1
             if cols % self.size == 0:
@@ -139,4 +186,6 @@ if __name__ == '__main__':
         if len(sys.argv) == 2:
             puzzle.load(sys.argv[1])
 
+    print(puzzle)
+    puzzle.solve()
     print(puzzle)
